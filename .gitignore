@@ -6,10 +6,12 @@ package-lock.json
 .env
 cookies.txt
 
-# ── Internal Data Files (auto-generated, not for VCS) ─────────
+# ── Internal Data Files (auto-generated, runtime only) ────────
 # Pipeline data
 ig_list.txt
 ig_done.txt
+ig_valid_list.txt
+ig_checked.txt
 ig_unfollowed_history.txt
 con.txt
 sucvat.txt
@@ -32,3 +34,7 @@ gilgamesh/id_list_gil.txt
 gilgamesh/ig_done_gil.txt
 gilgamesh/session_*.txt
 gilgamesh/session_excluded_report_gil.txt
+
+# ── Allow example/template files ──────────────────────────────
+!*.txt.example
+!gilgamesh/*.txt.example

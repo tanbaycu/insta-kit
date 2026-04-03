@@ -1,0 +1,6 @@
+# ig_list.txt — Raw scraped Instagram handles (Stage 1 output)
+# Format: one Instagram username per line (no @ prefix)
+# Example:
+# john_doe
+# jane_smith123
+# user.name_99

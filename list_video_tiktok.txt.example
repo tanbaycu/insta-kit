@@ -1,0 +1,5 @@
+# list_video_tiktok.txt — TikTok video URLs to scrape comments from (input for 1.js)
+# Format: one full TikTok video URL per line
+# Example:
+# https://www.tiktok.com/@username/video/1234567890123456789
+# https://www.tiktok.com/@another/video/9876543210987654321

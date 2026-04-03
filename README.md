@@ -52,24 +52,30 @@ insta-kit/
 
 ```bash
 # 1. Clone and install dependencies
-git clone https://github.com/<your-org>/insta-kit.git
+git clone https://github.com/tanbaycu/insta-kit.git
 cd insta-kit
 npm install
 
-# 2. Initialize required pipeline data files
-echo. > ig_list.txt
-echo. > ig_done.txt
-echo. > list_video_tiktok.txt
+# 2. Initialize pipeline data files from templates
+copy ig_list.txt.example ig_list.txt
+copy ig_done.txt.example ig_done.txt
+copy list_video_tiktok.txt.example list_video_tiktok.txt
+
+# For Gilgamesh secondary account
+copy gilgamesh\id_list_gil.txt.example gilgamesh\id_list_gil.txt
 
 # 3. Populate TikTok video links (one URL per line)
 #    Edit list_video_tiktok.txt with target video URLs
 
 # 4. Launch Chrome with remote debugging enabled
-start_chrome.bat          # Windows — main account
-# gilgamesh\start_chrome_gil.bat  — secondary account
+start_chrome.bat                      # main account
+# gilgamesh\start_chrome_gil.bat      # secondary account
 
 # 5. Sign in to Instagram inside the launched Chrome window
 ```
+
+> **Template files** (`.txt.example`) are committed to the repository as empty scaffolds.
+> All runtime data files (`.txt`) are excluded from version control via `.gitignore`.
 
 ---
 

@@ -1,0 +1,6 @@
+# ig_done.txt — Log of all Instagram accounts that have been followed
+# Format: one Instagram username per line (no @ prefix)
+# This file acts as a deduplication guard — accounts here will never be re-followed.
+# Example:
+# john_doe
+# jane_smith123
