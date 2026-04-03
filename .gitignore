@@ -1,0 +1,34 @@
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+package-lock.json
+
+# ── Environment & Secrets ─────────────────────────────────────
+.env
+cookies.txt
+
+# ── Internal Data Files (auto-generated, not for VCS) ─────────
+# Pipeline data
+ig_list.txt
+ig_done.txt
+ig_unfollowed_history.txt
+con.txt
+sucvat.txt
+
+# Filtering temp & output
+6_v1_checked.txt
+6_v1_co.txt
+6_v1_khong.txt
+6_v2_checked.txt
+
+# TikTok input queue
+list_video_tiktok.txt
+
+# Session logs
+session_*.txt
+session_excluded_report.txt
+
+# ── Gilgamesh Account Data ────────────────────────────────────
+gilgamesh/id_list_gil.txt
+gilgamesh/ig_done_gil.txt
+gilgamesh/session_*.txt
+gilgamesh/session_excluded_report_gil.txt
