@@ -21,7 +21,7 @@ async function scrapeTab(browser, link, tabId) {
     const page = await browser.newPage();
     try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        console.log(`\n[VỆ TINH ${tabId}] 🟢 Đã nạp thành công Video: ${url}`);
+        console.log(`\n[WORKER ${tabId}] 🟢 Video loaded successfully: ${url}`);
         
         await delay(5000); 
 
@@ -134,20 +134,20 @@ async function scrapeTab(browser, link, tabId) {
 
                     if (igUsername) {
                         let hasLiked = false;
-                        // THẢ TIM COMMENT TỰ ĐỘNG! (Tuyệt chiêu thu hút sự chú ý)
+                        // AUTO-LIKE COMMENT to attract attention to the account
                         try {
                             let curr = textEl;
                             let likeBtn = null;
-                            // Leo ngọn cây DOM lên 10 cấp
+                            // Walk up the DOM tree up to 10 levels
                             for (let k = 0; k < 10; k++) {
                                 if (!curr) break;
-                                // Tìm Icon Trái Tim thông qua mã Cấu trúc vẽ SVG (do TikTok giấu thuộc tính data)
+                                // Locate the heart icon via TikTok's SVG path signature
                                 let svgs = curr.querySelectorAll('svg');
                                 for (let svg of svgs) {
                                     let path = svg.querySelector('path');
                                     if (path) {
                                         let d = path.getAttribute('d') || '';
-                                        // Mã uốn cong hình trái tim của Tiktok (Bắt đầu M24 12 và cong M24 34.91)
+                                        // TikTok heart SVG path identifier (starts with M24 12, curves to M24 34.91)
                                         if (d.startsWith('M24 12') || d.includes('25.06 38.07')) {
                                             likeBtn = svg;
                                             break;
@@ -157,9 +157,9 @@ async function scrapeTab(browser, link, tabId) {
                                 if (likeBtn) break;
                                 curr = curr.parentElement;
                             }
-                            // Bóp cò Thả Tim!
+                            // Trigger the like action
                             if (likeBtn) {
-                                // Nút bấm thật sự nằm ngoài SVG 1 hoặc 2 cấp
+                                // Actual clickable target is 1-2 levels outside the SVG
                                 let targetClick = likeBtn.closest('div[role="button"], button') || likeBtn.parentElement;
                                 if (targetClick) {
                                     targetClick.click();
@@ -176,7 +176,7 @@ async function scrapeTab(browser, link, tabId) {
 
             let appendedCount = 0;
             if (newIGs && newIGs.length > 0) {
-                // Tái nạp danh sách Done mỗi vòng để nếu Tab kia vô tình quét trúng ID Tab này vừa chốt thì đá văng nha
+                // Reload done list every loop to prevent duplicate writes across parallel tabs
                 if (fs.existsSync('ig_done.txt')) {
                     fs.readFileSync('ig_done.txt', 'utf8').split('\n').filter(Boolean).forEach(id => globalIgSet.add(id.trim()));
                 }
@@ -186,14 +186,14 @@ async function scrapeTab(browser, link, tabId) {
                     if (!globalIgSet.has(cleanIG)) {
                         globalIgSet.add(cleanIG);
                         fs.appendFileSync('ig_list.txt', cleanIG + '\n'); 
-                        let tymStatus = o.liked ? '❤️ ĐÃ TYM' : '🖤 KO TYM ĐC';
-                        console.log(`[TAB ${tabId}] 💾 [Đóng gói] [${tymStatus}] => ${cleanIG} (Trích từ: "${o.text.substring(0, 30)}")`);
+                        let tymStatus = o.liked ? '❤️ LIKED' : '🖤 NO LIKE';
+                        console.log(`[TAB ${tabId}] 💾 [Saved] [${tymStatus}] => ${cleanIG} (from: "${o.text.substring(0, 30)}")`);
                         appendedCount++;
                     }
                 }
             }
             
-            console.log(`[TAB ${tabId}] --- Lượt cuộn ${loopCount}: Mở cmt [${clickedAny?'CÓ':'KO'}] | Gom thêm ${appendedCount} ID. (Kho Tổng: ${globalIgSet.size} ID)`);
+            console.log(`[TAB ${tabId}] --- Scroll #${loopCount}: Expand replies [${clickedAny?'YES':'NO'}] | New IDs collected: ${appendedCount} (Global pool: ${globalIgSet.size})`);
 
             await page.evaluate((wasClicked) => {
                 const scrollableDivs = Array.from(document.querySelectorAll('div')).filter(d => {
@@ -213,20 +213,20 @@ async function scrapeTab(browser, link, tabId) {
         }
 
     } catch (err) {
-        console.error(`[TAB ${tabId}] ❌ LỖI VĂNG TAB:`, err.message);
+        console.error(`[TAB ${tabId}] ❌ FATAL TAB ERROR:`, err.message);
     }
 }
 
 (async () => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     
-    rl.question('\n[NHẬP LIỆU] Nhập Link TikTok số 1: ', (link1) => {
+    rl.question('\n[INPUT] Enter TikTok Link #1: ', (link1) => {
         if(!link1 || link1.length < 5) {
-            console.log("Cần ít nhất 1 cái Link ông giáo ơi!"); process.exit(1);
+            console.log("At least one link is required."); process.exit(1);
         }
-        rl.question('[NHẬP LIỆU] Nhập Link TikTok số 2 (Đểu trống + Bấm Enter nếu chỉ chạy 1 Tab): ', async (link2) => {
+        rl.question('[INPUT] Enter TikTok Link #2 (leave blank + press Enter to run single tab): ', async (link2) => {
             rl.close();
-            console.log("\n🚀 Chuẩn bị thiết lập Mở Luồng Đào Comment Song Song...");
+            console.log("\n🚀 Initializing parallel comment scraping...");
             
             try {
                 const browser = await puppeteer.connect({
@@ -235,8 +235,8 @@ async function scrapeTab(browser, link, tabId) {
                     protocolTimeout: 0 
                 });
         
-                console.log(`=> Đã load sẵn ${globalIgSet.size} ID trong mảng bảo vệ để chặn trùng lặp!`);
-                console.log(`=> Chuẩn bị phi thẳng vào Comment...\n`);
+                console.log(`=> Loaded ${globalIgSet.size} IDs into dedup guard set.`);
+                console.log(`=> Launching into comments...\n`);
                 
                 let tasks = [];
                 tasks.push(scrapeTab(browser, link1, 1));
@@ -245,10 +245,10 @@ async function scrapeTab(browser, link, tabId) {
                     tasks.push(scrapeTab(browser, link2.trim(), 2));
                 }
                 
-                // Nổ hai cái đồng thời
+                // Fire both workers simultaneously
                 await Promise.all(tasks);
 
-            } catch(e) { console.error("Không móc được tới ruột con Chrome! Coi chừng chưa bật bằng file start_chrome", e); }
+            } catch(e) { console.error("Failed to connect to Chrome. Make sure start_chrome.bat is running.", e); }
         });
     });
 })();

@@ -21,7 +21,7 @@ const cleanName = (str) => {
 
 async function runWorker(tabId, browser) {
     const page = await browser.newPage();
-    console.log(`\n=> [TAB ${tabId}]: Đã khởi động!`);
+    console.log(`\n=> [TAB ${tabId}]: Started!`);
 
     while (true) { 
         if (!fs.existsSync('ig_list.txt')) {
@@ -52,7 +52,7 @@ async function runWorker(tabId, browser) {
 
         if (todoUsers.length === 0) {
             if (checkedCountGlobal % 5 === 0 && tabId === 1) { 
-                console.log(`[⏳] Đang đợi ID mới từ ig_list.txt... (Đã kiểm tra: ${checkedSet.size} tài khoản).`);
+                console.log(`[⏳] Waiting for new IDs in ig_list.txt... (Checked: ${checkedSet.size} accounts)`);
             }
             checkedCountGlobal++;
             await delay(5000 + Math.random() * 2000);
@@ -63,7 +63,7 @@ async function runWorker(tabId, browser) {
         
         isProcessingSet.add(username);
         
-        console.log(`\n▶ [TAB ${tabId}] Đang phân tích Profile: @${username}`);
+        console.log(`\n▶ [TAB ${tabId}] Analyzing profile: @${username}`);
         let url = `https://www.instagram.com/${username}/`;
 
         try {
@@ -74,12 +74,13 @@ async function runWorker(tabId, browser) {
                 let followersStr = '';
                 let followingStr = '';
 
-                // Thuật toán xuyên giáp: Ép đọc Chữ Text "Người Theo Dõi" thay vì đợi bắt thẻ DOM ul li cũ đã bị Meta giả mạo
+                // Text-scan strategy: reads raw innerText from header elements instead of relying on DOM structure
+                // Meta frequently restructures the <ul><li> layout, making CSS selectors unreliable
                 for (let i = 0; i < 15; i++) {
                     let elements = Array.from(document.querySelectorAll('header a, header li, header span, header div'));
                     for (let el of elements) {
                         let text = (el.innerText || el.textContent || '').toLowerCase().trim();
-                        // Trích xuất những chuỗi text CÓ CHỨA số kèm từ khóa (chiều dài dải ngắn để tránh đọc nhầm tiểu sử)
+                        // Extract strings that contain a number alongside follower/following keyword (short strings only)
                         if ((text.includes('người theo dõi') || text.includes('followers')) && /\d/.test(text) && text.length < 50) {
                             followersStr = text;
                         }
@@ -113,49 +114,49 @@ async function runWorker(tabId, browser) {
 
             if (!stats) {
                 isPassed = false;
-                rejectReason = 'Không lấy được thông số (URL sai hoặc Private).';
+                rejectReason = 'Could not retrieve stats (URL invalid or private account).';
             } else if (stats.followers < 10 || stats.following < 10) {
                 isPassed = false;
-                rejectReason = `Không đủ tiêu chuẩn (${stats.followers} Followers, ${stats.following} Following).`;
+                rejectReason = `Below minimum threshold (${stats.followers} followers, ${stats.following} following).`;
             } else if (stats.followers >= (stats.following * 10) && stats.following > 0) {
                 isPassed = false;
-                rejectReason = `Tài khoản lệch tỷ lệ / Thương hiệu (${stats.followers} Followers và ${stats.following} Following).`;
+                rejectReason = `Skewed ratio — likely a brand/influencer account (${stats.followers} followers / ${stats.following} following).`;
             }
 
             if (!isPassed) {
-                console.log(`=> ⏩ [TAB ${tabId}] LOẠI BỎ @${username}: ${rejectReason}`);
+                console.log(`=> ⏩ [TAB ${tabId}] REJECTED @${username}: ${rejectReason}`);
                 fs.appendFileSync('ig_checked.txt', username + '\n');
             } else {
-                console.log(`=> ✅ [TAB ${tabId}] ĐẠT YÊU CẦU @${username} (${stats.followers} FL | ${stats.following} Đang FL). Đã lưu vào ig_valid_list.txt`);
+                console.log(`=> ✅ [TAB ${tabId}] PASSED @${username} (${stats.followers} FL | ${stats.following} Following). Saved to ig_valid_list.txt`);
                 fs.appendFileSync('ig_valid_list.txt', username + '\n');
                 fs.appendFileSync('ig_checked.txt', username + '\n');
             }
         } catch (err) {
-            console.log(`=> ❌ [TAB ${tabId}] LỖI TIMEOUT @${username}: Mất kết nối hoặc giới hạn mạng.`);
+            console.log(`=> ❌ [TAB ${tabId}] TIMEOUT ERROR @${username}: Connection lost or rate limited.`);
             fs.appendFileSync('ig_checked.txt', username + '\n'); 
         }
 
         isProcessingSet.delete(username);
 
         let delayNum = Math.floor(Math.random() * 4000) + 3000;
-        console.log(`  [TAB ${tabId}] Nghỉ ngẫu nhiên ${Math.round(delayNum / 1000)}s...`);
+        console.log(`  [TAB ${tabId}] Resting randomly for ${Math.round(delayNum / 1000)}s...`);
         await delay(delayNum);
     }
 }
 
 (async () => {
     console.log("==========================================");
-    console.log("   🔬 CHƯƠNG TRÌNH LỌC TÀI KHOẢN (3.JS) 🔬  ");
-    console.log("     [HỖ TRỢ CHẠY NHIỀU TAB SONG SONG]    ");
+    console.log("   🔬 ACCOUNT VALIDATOR (3.JS) 🔬  ");
+    console.log("     [MULTI-TAB PARALLEL SUPPORT]    ");
     console.log("==========================================\n");
     
-    rl.question('Nhập số lượng Tab chạy song song (Khuyên dùng 1-5): ', async (tabs) => {
+    rl.question('Enter number of parallel tabs (recommended: 1-5): ', async (tabs) => {
         rl.close();
         let numTabs = parseInt(tabs.trim()) || 1;
         if(numTabs <= 0) numTabs = 1;
         if(numTabs > 10) numTabs = 10;
         
-        console.log(`\n=> ✅ Bắt đầu khởi tạo [${numTabs}] Tab...`);
+        console.log(`\n=> ✅ Spawning [${numTabs}] validation workers...`);
 
         try {
             const browser = await puppeteer.connect({
@@ -172,7 +173,7 @@ async function runWorker(tabId, browser) {
             await Promise.all(workers);
 
         } catch (err) {
-            console.error("LỖI KẾT NỐI CHROME DO ĐÓNG TRÌNH DUYỆT HOẶC MẤT MẠNG", err);
+            console.error("CHROME CONNECTION ERROR — browser may be closed or unreachable.", err);
         }
     });
 })();

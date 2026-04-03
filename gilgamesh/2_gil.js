@@ -19,6 +19,8 @@ async function runWorker(tabId, browser, sessionFile) {
     console.log(`\n=> [TAB ${tabId}]: Started for Gilgamesh! Handling Session: ${sessionFile}`);
     let consecutiveErrors = 0;
 
+    // Visibility spoofing: overrides visibilityState so Instagram never detects
+    // tab-switching or backgrounding — keeps the session alive indefinitely
     await page.evaluateOnNewDocument(() => {
         Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
         Object.defineProperty(document, 'hidden', { get: () => false });
@@ -63,9 +65,10 @@ async function runWorker(tabId, browser, sessionFile) {
 
         let successInThisTurn = false;
         try {
+            // Step 1: Open the search panel if not already visible
             let searchIcon = await page.evaluateHandle(() => {
                 let existingInput = document.querySelector('input[placeholder="Tìm kiếm"], input[placeholder="Search"]');
-                if(existingInput) return null; 
+                if(existingInput) return null; // Already open — skip click
                 let svgs = Array.from(document.querySelectorAll('svg[aria-label="Tìm kiếm"], svg[aria-label="Search"]'));
                 for(let svg of svgs) return svg.closest('div[role="button"], a, span, li') || svg;
                 return null;
@@ -81,13 +84,16 @@ async function runWorker(tabId, browser, sessionFile) {
             await page.waitForSelector(inputSelector, { timeout: 10000 });
             let inputEl = await page.$(inputSelector);
             
+            // Clear previous query
             await inputEl.click({ clickCount: 3 }); 
             await page.keyboard.press('Backspace');
             await delay(500);
             
+            // Type with human-like keystroke cadence (avoids clipboard paste fingerprint)
             await inputEl.type(username, { delay: 90 });
-            await delay(3500); 
+            await delay(3500); // Wait for Instagram suggestion API to resolve
 
+            // Step 2: Click first valid search result (avatar card, excludes nav/explore links)
             let searchTargetSuccess = await page.evaluate((searchStr) => {
                 let links = Array.from(document.querySelectorAll('a[href^="/"]'));
                 let searchLinks = links.filter(a => {
@@ -115,6 +121,7 @@ async function runWorker(tabId, browser, sessionFile) {
                 await delay(3500);
 
                 let followResult = false;
+                // Multi-attempt retry loop — up to 5 attempts per profile
                 for (let i = 0; i < 5; i++) {
                     let foundBtnHandle = await page.evaluateHandle(() => {
                         let textElements = Array.from(document.querySelectorAll('header div, header a, header span, header button'));
@@ -130,20 +137,24 @@ async function runWorker(tabId, browser, sessionFile) {
                     let isClickable = await page.evaluate(e => e !== null, foundBtnHandle);
                     
                     if (isClickable) {
+                        // Primary: Puppeteer native click with randomized delay (isTrusted = true)
                         try {
                             await foundBtnHandle.click({ delay: Math.floor(Math.random() * 50) + 30 });
                         } catch (e) {
+                            // Fallback: in-page JS click if Puppeteer frame is detached
                             try { await page.evaluate(e => e.click(), foundBtnHandle); } catch (e2) {}
                         }
 
+                        // Post-click state verification — reads button text to confirm follow success
                         await delay(1500);
                         let textAfter = await page.evaluate(e => (e.innerText || e.textContent || '').trim().toLowerCase(), foundBtnHandle);
                         
                         if (textAfter.includes('đang theo dõi') || textAfter.includes('following') || textAfter.includes('đã yêu cầu') || textAfter.includes('requested')) {
                             followResult = true;
                         } else {
+                            // Network lag — secondary click to confirm
                             try { await foundBtnHandle.click({ delay: Math.floor(Math.random() * 60) + 40 }); } catch (e) {}
-                            followResult = true; 
+                            followResult = true; // Mark as best-effort success
                         }
                         
                         await foundBtnHandle.dispose();
@@ -158,7 +169,7 @@ async function runWorker(tabId, browser, sessionFile) {
                     console.log(`=> ✅ [TAB ${tabId}] Successfully FOLLOWED @${username}.`);
                     fs.appendFileSync('ig_done_gil.txt', username + '\n');
                     successInThisTurn = true;
-                    consecutiveErrors = 0; 
+                    consecutiveErrors = 0; // Reset circuit breaker
                 } else {
                     console.log(`=> ⏩ [TAB ${tabId}] Target skipped (Page not found, blocked, or already followed).`);
                     fs.appendFileSync('ig_done_gil.txt', username + '\n');
@@ -173,15 +184,16 @@ async function runWorker(tabId, browser, sessionFile) {
 
         isProcessingSet.delete(username);
 
+        // Auto-reset circuit breaker: 2 consecutive failures triggers a hard reload to flush rate-limit state
         if (consecutiveErrors >= 2) {
-            console.log(`\n=> 🔄 [TAB ${tabId}] Failed 2 times in a row. Reloading the Instagram origin page to prevent loop blocks...`);
+            console.log(`\n=> 🔄 [TAB ${tabId}] 2 consecutive failures detected. Reloading Instagram origin page to reset soft-block state...`);
             try {
                 await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
                 await delay(4000);
             } catch (navErr) {
-                console.log(`=> ❌ [TAB ${tabId}] Error while reloading the origin page:`, navErr.message);
+                console.log(`=> ❌ [TAB ${tabId}] Failed to reload origin page:`, navErr.message);
             }
-            consecutiveErrors = 0; 
+            consecutiveErrors = 0; // Reset after recovery
         }
 
         let delayNum = Math.floor(Math.random() * 8000) + 10000;
@@ -192,7 +204,7 @@ async function runWorker(tabId, browser, sessionFile) {
 
 (async () => {
     console.log("==========================================");
-    console.log("   🚀 GILGAMESH AUTO FOLLOW PROGRAM 🚀 ");
+    console.log("   🚀 GILGAMESH AUTO FOLLOW ENGINE 🚀 ");
     console.log("==========================================\n");
 
     let allList = new Set();
@@ -216,7 +228,7 @@ async function runWorker(tabId, browser, sessionFile) {
                     count++; 
                 }
             });
-            console.log(`  - Checked File [${file}]: contains ${count} accounts.`);
+            console.log(`  - Indexed blacklist file [${file}]: ${count} accounts loaded.`);
         }
     }
 
@@ -227,15 +239,15 @@ async function runWorker(tabId, browser, sessionFile) {
         if (!excludeMap.has(id)) {
             validSessionIds.push(id);
         } else {
-            excludedLog.push(`@${id} -> Skipped due to existing in file: ${excludeMap.get(id)}`);
+            excludedLog.push(`@${id} -> Excluded — found in file: ${excludeMap.get(id)}`);
         }
     });
 
-    console.log(`\n=> ✅ COMPLETED PARSING AND CLEANING UP [id_list_gil.txt]!`);
-    console.log(`   + Total new IDs NEEDING PROCESSING: ${validSessionIds.length} accounts`);
+    console.log(`\n=> ✅ DEDUPLICATION COMPLETE FOR [id_list_gil.txt]!`);
+    console.log(`   + Clean IDs ready to process: ${validSessionIds.length} accounts`);
 
     if (validSessionIds.length === 0) {
-        console.log("\n❌ Out of work! All IDs have been followed.");
+        console.log("\n❌ Nothing to do! All IDs have been followed. Feed the pipeline with fresh data.");
         process.exit();
     }
 
@@ -243,7 +255,7 @@ async function runWorker(tabId, browser, sessionFile) {
     fs.writeFileSync(sessionName, validSessionIds.join('\n'));
     fs.writeFileSync('session_excluded_report_gil.txt', excludedLog.join('\n'));
     
-    console.log(`\n=> ✅ Initializing [1] automated tab...`);
+    console.log(`\n=> ✅ Spawning [1] automated worker...`);
 
     try {
         const browser = await puppeteer.connect({
@@ -253,6 +265,6 @@ async function runWorker(tabId, browser, sessionFile) {
 
         await runWorker(1, browser, sessionName);
     } catch (err) {
-        console.error("CHROME CONNECTION ERROR (Browser might be closed or disconnected):", err);
+        console.error("CHROME CONNECTION ERROR (browser may be closed or disconnected):", err);
     }
 })();

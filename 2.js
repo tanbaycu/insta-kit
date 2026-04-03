@@ -21,23 +21,25 @@ const cleanName = (str) => {
 
 async function runWorker(tabId, browser, sessionFile) {
     const page = await browser.newPage();
-    console.log(`\n=> [TAB ${tabId}]: Đã khởi động! Chịu trách nhiệm Cày Phiên: ${sessionFile}`);
-    let followCount = 0; // Biến đếm Nhịp Độ (Chống SPAM XUYÊN MÀN ĐÊM)
+    console.log(`\n=> [TAB ${tabId}]: Started! Handling session file: ${sessionFile}`);
+    let followCount = 0; // Throttle counter — prevents rate-limit triggers over long runs
 
-    // Bơm Code Hack Cảm Biến: Đánh lừa Trình duyệt & Instagram rằng [Tab Này Luôn Được Nhìn Thấy]. Chống ngủ gật khi bạn sang Tab khác.
+    // Visibility spoofing: tricks the browser and Instagram into believing this tab is always in focus.
+    // Prevents session suspension when the user switches to another tab.
     await page.evaluateOnNewDocument(() => {
         Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
         Object.defineProperty(document, 'hidden', { get: () => false });
         window.addEventListener('visibilitychange', e => e.stopImmediatePropagation(), true);
     });
 
-    // Bật một trang chủ Instagram duy nhất để lừa hệ thống là ta đang cắm rễ dạo lướt trên trình duyệt chứ không phải tải từng URL rời rạc
+    // Navigate to Instagram homepage first to establish a natural browsing session
+    // before performing follow actions — avoids pattern detection from URL-direct navigation
     await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
     await delay(3000); 
 
     while (true) { 
         if (!fs.existsSync(sessionFile)) {
-            console.log(`\n[TAB ${tabId}] LỖI NGHIÊM TRỌNG: Mất file phiên chạy ${sessionFile}. Trình duyệt tự động đóng.`);
+            console.log(`\n[TAB ${tabId}] CRITICAL ERROR: Session file ${sessionFile} is missing. Closing worker.`);
             break;
         }
 
@@ -56,7 +58,7 @@ async function runWorker(tabId, browser, sessionFile) {
 
         if (todoUsers.length === 0) {
             if (checkedCountGlobal % 5 === 0 && tabId === 1) { 
-                console.log(`[⏳] Toàn bộ ID Sạch (${allUsers.length}) trong phiên chạy đã duyệt XONG! Nghỉ hưu đợi Phiên mới...`);
+                console.log(`[⏳] All clean IDs (${allUsers.length}) in session have been processed. Waiting for new session...`);
             }
             checkedCountGlobal++;
             await delay(5000 + Math.random() * 2000);
@@ -67,17 +69,19 @@ async function runWorker(tabId, browser, sessionFile) {
         
         isProcessingSet.add(username);
         
-        console.log(`\n▶ [TAB ${tabId}] Đang tìm kiếm: @${username}`);
+        console.log(`\n▶ [TAB ${tabId}] Targeting: @${username}`);
 
         try {
-            // [CẤU TRÚC MỚI]: SỬ DỤNG THANH TÌM KIẾM ĐỂ HƯỞNG LỢI AI GỢI Ý (Bypass ID sai) + VƯỢT SOFT-BAN RATE LIMIT
-            // 1. Nhấn nút Kính Lúp mở Khay Menu nếu Cột Gõ Username chưa xuất hiện 
+            // [SEARCH-BASED NAVIGATION]: Uses Instagram's search bar instead of direct URL injection.
+            // Benefits: bypasses soft-ban rate limits, leverages AI suggestion, avoids direct URL fingerprinting.
+
+            // Step 1: Open search panel if not already visible
             let searchIcon = await page.evaluateHandle(() => {
-                // Thăm dò Input mở sẵn
+                // Check if input is already open
                 let existingInput = document.querySelector('input[placeholder="Tìm kiếm"], input[placeholder="Search"]');
-                if(existingInput) return null; // Nếu đã hở nắp rồi thì khỏi click mở Menu
+                if(existingInput) return null; // Already open, skip click
                 
-                // Nếu chưa hở thì tìm Nút SVG Tìm Kiếm của Sidebar
+                // Find the search SVG button in the sidebar
                 let svgs = Array.from(document.querySelectorAll('svg[aria-label="Tìm kiếm"], svg[aria-label="Search"]'));
                 for(let svg of svgs) return svg.closest('div[role="button"], a, span, li') || svg;
                 return null;
@@ -85,29 +89,29 @@ async function runWorker(tabId, browser, sessionFile) {
             let isIconValid = await page.evaluate(e => e !== null, searchIcon);
             if (isIconValid) {
                 await searchIcon.click();
-                await delay(1500); // Chờ khay tìm kiếm trượt ra
+                await delay(1500); // Wait for search panel slide-in animation
             }
             if (isIconValid) await searchIcon.dispose();
 
-            // 2. Điền ID Người dùng vào Khu vực Tìm Kiếm
+            // Step 2: Type username into search input with human-like delay
             let inputSelector = 'input[placeholder="Tìm kiếm"], input[placeholder="Search"]';
-            await page.waitForSelector(inputSelector, { timeout: 10000 }); // Đợi cái gõ chữ hiện lên
+            await page.waitForSelector(inputSelector, { timeout: 10000 });
             let inputEl = await page.$(inputSelector);
             
-            // Bôi đen xóa sạch text của vòng lặp cũ cũ
+            // Clear previous search content
             await inputEl.click({ clickCount: 3 }); 
             await page.keyboard.press('Backspace');
             await delay(500);
             
-            // Gõ Tên Nhẹ Nhàng (Không copy paste cục súc)
+            // Type with realistic keystroke cadence (no clipboard paste — detectable)
             await inputEl.type(username, { delay: 90 });
-            await delay(3500); // Đợi AI IG trích xuất dữ liệu trả kết quả thẻ xuống thả (Loading Gợi Ý)
+            await delay(3500); // Wait for Instagram's suggestion API to resolve
 
-            // 3. Móc Cấu Trúc Bấm Bầu Kết Quả Đầu Tiên Ở Phía Dưới Ô Tìm Kiếm
+            // Step 3: Click first search result (avatar-bearing link, excluded nav/explore links)
             let searchTargetSuccess = await page.evaluate((searchStr) => {
                 let links = Array.from(document.querySelectorAll('a[href^="/"]'));
                 
-                // Gạn đục khơi trong lập bảng TẤT CẢ Thẻ Kết quả Search (Có ảnh Avatar, Kích thước hợp lệ, KHÔNG thuộc thanh Menu Trái lấn át)
+                // Filter to valid profile result cards only
                 let searchLinks = links.filter(a => {
                     let inNav = a.closest('nav, [role="navigation"]');
                     let hasImg = a.querySelector('img');
@@ -115,7 +119,7 @@ async function runWorker(tabId, browser, sessionFile) {
                     return !inNav && hasImg && rect.width > 0 && rect.height > 0 && !a.href.includes('/explore/') && !a.href.includes('/direct/');
                 });
                 
-                // NẾU CÓ KẾT QUẢ TÌM KIẾM MỌC RA -> Luôn click thằng Thẻ <a> đầu tiên (Mặc định là đích danh hoặc Gợi Ý đổi tên mới nhất)
+                // Click the top result (exact match or closest suggestion)
                 if (searchLinks.length > 0) {
                     searchLinks[0].click();
                     return true;
@@ -125,10 +129,10 @@ async function runWorker(tabId, browser, sessionFile) {
             }, username);
 
             if (!searchTargetSuccess) {
-                console.log(`=> ⏩ [TAB ${tabId}] Bỏ qua @${username} (Không tìm thấy trên thanh Tìm Kiếm Instagram).`);
+                console.log(`=> ⏩ [TAB ${tabId}] Skipped @${username} (Not found in Instagram search).`);
                 fs.appendFileSync('ig_done.txt', username + '\n');
                 
-                // Gõ tên vớ vẩn rác ko ra ai -> Đóng nắp Khay tìm kiếm (Bấm ESC 2 lần) cho sạch Menu để nhường đường cho lặp kế tiếp
+                // Clean up search panel for the next loop iteration
                 let inputElRetry = await page.$(inputSelector);
                 if(inputElRetry) { await inputElRetry.click({ clickCount: 3 }); await page.keyboard.press('Backspace'); }
                 await page.keyboard.press('Escape');
@@ -136,12 +140,13 @@ async function runWorker(tabId, browser, sessionFile) {
                 continue;
             }
 
-            // Click vào tài khoản xong -> Chờ hiệu ứng IG bôi trơn tải Web Profile mới (Tốc độ ánh sáng do ko load lại trang Header)
+            // Profile loaded via client-side navigation — no full page reload, extremely fast
             await delay(3500);
 
             let followResult = false;
             for (let i = 0; i < 5; i++) {
-                // Đẩy hàm tìm kiếm Button sang Môi trường Node (thay vì thuần JS Trình Duyệt) để sử dụng con trỏ thật (isTrusted = true)
+                // Locate Follow button using Puppeteer ElementHandle (isTrusted = true) 
+                // instead of in-page JS click — bypasses React's synthetic event guard
                 let foundBtnHandle = await page.evaluateHandle(() => {
                     let textElements = Array.from(document.querySelectorAll('header div, header a, header span, header button'));
                     for (let el of textElements) {
@@ -156,23 +161,23 @@ async function runWorker(tabId, browser, sessionFile) {
                 let isClickable = await page.evaluate(e => e !== null, foundBtnHandle);
                 
                 if (isClickable) {
-                    // MÔ PHỎNG MOUSE CỦA NGƯỜI DÙNG TỪ CẤP ĐỘ NATIVE TRÌNH DUYỆT (Puppeteer Click) để hạ gục React Cấm JS Clicks
+                    // Native Puppeteer click with randomized delay to simulate human motor variance
                     try {
                         await foundBtnHandle.click({ delay: Math.floor(Math.random() * 50) + 30 });
                     } catch (e) {
-                        try { await page.evaluate(e => e.click(), foundBtnHandle); } catch (e2) {} // Fallback nếu DOM bị che khuất
+                        try { await page.evaluate(e => e.click(), foundBtnHandle); } catch (e2) {} // Fallback: in-page JS click if frame detached
                     }
 
-                    // CHỜ VÀ ÉP KIỂM TRA LẠI XEM TEXT ĐÃ ĐỔI THÀNH "ĐANG THEO DÕI" CHƯA (DOUBLE CHECK!)
+                    // Verify button state changed to "following" — confirms action success
                     await delay(1500);
                     let textAfter = await page.evaluate(e => (e.innerText || e.textContent || '').trim().toLowerCase(), foundBtnHandle);
                     
                     if (textAfter.includes('đang theo dõi') || textAfter.includes('following') || textAfter.includes('đã yêu cầu') || textAfter.includes('requested')) {
                         followResult = true;
                     } else {
-                        // Instagram Load lỗi mạng không nhận click -> Click Bồi Lần 2 Cho Chắc Nhất
+                        // Network lag prevented state update — secondary click to confirm
                         try { await foundBtnHandle.click({ delay: Math.floor(Math.random() * 60) + 40 }); } catch (e) {}
-                        followResult = true; // Vẫn chốt Thành công coi  như mình làm hết sức
+                        followResult = true; // Mark as success — best-effort
                     }
                     
                     await foundBtnHandle.dispose();
@@ -184,44 +189,44 @@ async function runWorker(tabId, browser, sessionFile) {
             }
 
             if (followResult) {
-                console.log(`=> ✅ [TAB ${tabId}] Follow THÀNH CÔNG cho @${username}.`);
+                console.log(`=> ✅ [TAB ${tabId}] Successfully followed @${username}.`);
                 fs.appendFileSync('ig_done.txt', username + '\n');
                 
-                followCount++; // Cộng điểm thành tích 
-                // [TÍNH NĂNG MỚI NÂNG CẤP]: CẮM NGỦ ĐÔNG AUTO NGẪU NHIÊN SAU KHI CÀY 100 QUẢ NÉ CHECKPOINT
+                followCount++;
+                // [DEEP SLEEP CIRCUIT]: Auto-hibernates after 200 follows to evade Instagram's checkpoint trigger
                 if (followCount >= 200) {
-                    let longRestMinutes = Math.floor(Math.random() * 20) + 30; // Random Ngủ 30 -> 50 Phút
-                    console.log(`\n=> 🛑 [TAB ${tabId}] BÁO ĐỘNG NGỦ ĐÔNG! Vệ tinh đã hoạt động liên tục (${followCount} lựơt).`);
-                    console.log(`   ⏳⏳ Sẽ kích hoạt Lệnh Tự Ngủ trong: ${longRestMinutes} PHÚT để đánh lừa Anti-Spam của máy chủ. Bạn cắm máy đừng tắt nhé...`);
+                    let longRestMinutes = Math.floor(Math.random() * 20) + 30; // Random 30–50 min sleep
+                    console.log(`\n=> 🛑 [TAB ${tabId}] DEEP SLEEP ACTIVATED! Worker has run ${followCount} follow cycles.`);
+                    console.log(`   ⏳⏳ Hibernating for ${longRestMinutes} minutes to evade anti-spam detection. Do not close the machine...`);
                     await delay(longRestMinutes * 60 * 1000); 
-                    console.log(`=> 🌅 [TAB ${tabId}] TỈNH Xong Giấc Ngủ! Tiếp tục Cày Phiên Chạy Cũ...`);
-                    followCount = 0; // Trở lại Vòng Đời Trinh Nguyên
+                    console.log(`=> 🌅 [TAB ${tabId}] Resumed from hibernation. Continuing session...`);
+                    followCount = 0; // Reset throttle counter
                 }
                 
             } else {
-                console.log(`=> ⏩ [TAB ${tabId}] Bỏ qua mục tiêu (Trang Không Tồn Tại, Bị Chặn hoặc Đã Follow).`);
+                console.log(`=> ⏩ [TAB ${tabId}] Skipped target (page not found, blocked, or already followed).`);
                 fs.appendFileSync('ig_done.txt', username + '\n');
             }
         } catch (err) {
-            console.log(`=> ❌ [TAB ${tabId}] LỖI TIMEOUT @${username}: Mất kết nối hoặc giới hạn mạng.`);
+            console.log(`=> ❌ [TAB ${tabId}] TIMEOUT ERROR @${username}: Connection lost or rate limited.`);
             fs.appendFileSync('ig_done.txt', username + '\n');
         }
 
         isProcessingSet.delete(username);
 
         let delayNum = Math.floor(Math.random() * 7000) + 6000;
-        console.log(`  [TAB ${tabId}] Nghỉ ngẫu nhiên ${Math.round(delayNum / 1000)}s...`);
+        console.log(`  [TAB ${tabId}] Resting randomly for ${Math.round(delayNum / 1000)}s...`);
         await delay(delayNum);
     }
 }
 
 (async () => {
     console.log("==========================================");
-    console.log("   🚀 CHƯƠNG TRÌNH AUTO FOLLOW (2.JS) 🚀  ");
-    console.log("   [PHIÊN BẢN CHUẨN HÓA DATA ĐẦU VÀO V4]   ");
+    console.log("   🚀 AUTO FOLLOW PROGRAM (2.JS) 🚀  ");
+    console.log("   [INPUT SANITIZATION ENGINE — V4]   ");
     console.log("==========================================\n");
 
-    console.log("🔄 BƯỚC 1: ĐANG TỔNG HỢP VÀ ĐỐI CHIẾU LỌC RÁC TỪ CÁC TỆP LỊCH SỬ...\n");
+    console.log("🔄 STEP 1: AGGREGATING AND DEDUPLICATING DATA FROM HISTORY FILES...\n");
 
     let allList = new Set();
     if (fs.existsSync('ig_list.txt')) {
@@ -231,7 +236,7 @@ async function runWorker(tabId, browser, sessionFile) {
         });
     }
 
-    // Những file nằm trong danh sách ĐEN (Tuyệt đối không Follow lại)
+    // Blacklist files — accounts that must never be re-followed
     let badFiles = ['ig_done.txt', 'ig_unfollowed_history.txt', 'con.txt', 'sucvat.txt'];
     let excludeMap = new Map();
     
@@ -239,16 +244,16 @@ async function runWorker(tabId, browser, sessionFile) {
         if (fs.existsSync(file)) {
             let count = 0;
             fs.readFileSync(file, 'utf8').split('\n').forEach(line => {
-                // Làm sạch Ký tự rác, khoảng trắng hoặc chữ In hoa gây nhiễu
+                // Normalize: strip whitespace, trailing chars, mixed casing
                 let id = cleanName(line);
                 if(id && !excludeMap.has(id)) { 
                     excludeMap.set(id, file); 
                     count++; 
                 }
             });
-            console.log(`  - Đã check Tệp [${file}]: có chứa ${count} tài khoản.`);
+            console.log(`  - Indexed blacklist file [${file}]: ${count} accounts loaded.`);
         } else {
-            console.log(`  - Không tìm thấy Tệp [${file}]. Bỏ qua.`);
+            console.log(`  - File [${file}] not found. Skipping.`);
         }
     }
 
@@ -259,40 +264,40 @@ async function runWorker(tabId, browser, sessionFile) {
         if (!excludeMap.has(id)) {
             validSessionIds.push(id);
         } else {
-            excludedLog.push(`@${id} -> Bỏ qua vì đã nằm trong tệp: ${excludeMap.get(id)}`);
+            excludedLog.push(`@${id} -> Excluded — found in file: ${excludeMap.get(id)}`);
         }
     });
 
-    console.log(`\n=> ✅ ĐÃ ĐỐI CHIẾU VÀ MÀI CHUỐT XONG TỆP [IG_LIST.TXT]!`);
-    console.log(`   + Tổng số ID nằm trong ig_list.txt ban đầu: ${allList.size}`);
-    console.log(`   + Tổng số ID giao thoa Lịch Sử (Đồ bỏ đi, Cấm vận): ${excludedLog.length}`);
-    console.log(`   + Tổng số lượng ID SẠCH 100%: ${validSessionIds.length} tài khoản mới CẦN XỬ LÝ!`);
+    console.log(`\n=> ✅ DEDUPLICATION COMPLETE FOR [IG_LIST.TXT]!`);
+    console.log(`   + Total IDs in ig_list.txt: ${allList.size}`);
+    console.log(`   + Excluded (history overlap): ${excludedLog.length}`);
+    console.log(`   + Clean IDs ready to process: ${validSessionIds.length}`);
 
     if (validSessionIds.length === 0) {
-        console.log("\n❌ Hết mẹ việc để làm! Toàn bộ ID trong List tải về đều đã Follow / Unfollow từ trước. Hãy cho Bot sục thêm List mới!");
+        console.log("\n❌ Nothing to do! All IDs have been previously followed or unfollowed. Feed the pipeline with fresh data.");
         process.exit();
     }
 
-    // Tạo tên File Phiên Phiên Chạy (Session File)
+    // Generate timestamped session file name
     let now = new Date();
     let sessionName = `session_follow_${now.getDate()}_${now.getMonth()+1}_${now.getHours()}h${now.getMinutes()}m.txt`;
     
-    // Ghi Toàn Bộ ID "Tinh Khiết" Vào File Session
+    // Write clean ID list to session file
     fs.writeFileSync(sessionName, validSessionIds.join('\n'));
     
-    // GHI RA BẢN BÁO CÁO CÁC ID BỊ BỎ QUA ĐỂ THEO DÕI NGUYÊN NHÂN ĐỐI CHIẾU (MINH BẠCH 100%)
+    // Write exclusion audit log for cross-verification
     fs.writeFileSync('session_excluded_report.txt', excludedLog.join('\n'));
     
-    console.log(`\n=> 📁 BƯỚC 2: TẠO THÀNH CÔNG PHIÊN CHẠY MỚI CỰC SẠCH MANG TÊN: [${sessionName}]`);
-    console.log(`      (Đã tự động đẻ ra file [session_excluded_report.txt] chứa giải trình lý do các ID bị gạch tên để kiểm chứng chéo).`);
+    console.log(`\n=> 📁 STEP 2: SESSION FILE CREATED: [${sessionName}]`);
+    console.log(`      (Exclusion audit written to [session_excluded_report.txt] for traceability).`);
     
-    rl.question('\nNhập số lượng Tab chạy song song cho Phiên Này (Khuyên dùng 1-4): ', async (tabs) => {
+    rl.question('\nEnter number of parallel tabs for this session (recommended: 1-4): ', async (tabs) => {
         rl.close();
         let numTabs = parseInt(tabs.trim()) || 1;
         if(numTabs <= 0) numTabs = 1;
         if(numTabs > 10) numTabs = 10;
         
-        console.log(`\n=> ✅ Bắt đầu khởi tạo [${numTabs}] Tab đâm thẳng vô File Phiên: [${sessionName}]...`);
+        console.log(`\n=> ✅ Spawning [${numTabs}] workers targeting session: [${sessionName}]...`);
 
         try {
             const browser = await puppeteer.connect({
@@ -309,7 +314,7 @@ async function runWorker(tabId, browser, sessionFile) {
             await Promise.all(workers);
 
         } catch (err) {
-            console.error("LỖI KẾT NỐI CHROME DO ĐÓNG TRÌNH DUYỆT HOẶC MẤT MẠNG", err);
+            console.error("CHROME CONNECTION ERROR — browser may be closed or unreachable.", err);
         }
     });
 })();
